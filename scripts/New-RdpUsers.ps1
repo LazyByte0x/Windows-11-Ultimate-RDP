@@ -56,14 +56,14 @@ function Add-LocalGroupMemberSafe {
 
 # Rotate the built-in runner admin password for this run only.
 $adminPassword = New-RandomPassword
-$adminPasswordSecure = ConvertTo-SecureString $adminPassword -AsPlainText -Force
+$adminPasswordSecure = ConvertTo-SecurePassword $adminPassword
 Set-LocalUserPassword -UserName 'runneradmin' -Password $adminPasswordSecure
 Add-GithubEnv -Name 'RDP_ADMIN_PASS' -Value $adminPassword
 Write-Ok 'runneradmin password rotated'
 
 # Dedicated session account with admin and RDP group membership.
 $sessionPassword = New-RandomPassword
-$sessionPasswordSecure = ConvertTo-SecureString $sessionPassword -AsPlainText -Force
+$sessionPasswordSecure = ConvertTo-SecurePassword $sessionPassword
 Set-LocalUserPassword -UserName 'ditzz' -Password $sessionPasswordSecure
 Add-LocalGroupMemberSafe -GroupName 'Administrators' -MemberName 'ditzz'
 Add-LocalGroupMemberSafe -GroupName 'Remote Desktop Users' -MemberName 'ditzz'

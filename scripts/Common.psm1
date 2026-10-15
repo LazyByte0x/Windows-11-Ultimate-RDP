@@ -42,6 +42,16 @@ function New-RandomPassword {
     return -join ($first, $rest)
 }
 
+function ConvertTo-SecurePassword {
+    # The session password starts its life as plaintext by design: it is
+    # generated here, displayed in the run Summary (the credential delivery
+    # channel), and must be handed to the LocalAccounts cmdlets. The rule is
+    # suppressed for this single, documented conversion point only.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '')]
+    param([Parameter(Mandatory)][string]$Password)
+    return ConvertTo-SecureString $Password -AsPlainText -Force
+}
+
 function Invoke-DownloadWithRetry {
     param(
         [Parameter(Mandatory)][string]$Uri,
@@ -78,6 +88,7 @@ Export-ModuleMember -Function @(
     'Write-Warn',
     'Add-GithubEnv',
     'New-RandomPassword',
+    'ConvertTo-SecurePassword',
     'Invoke-DownloadWithRetry',
     'Test-ImageResponse'
 )
