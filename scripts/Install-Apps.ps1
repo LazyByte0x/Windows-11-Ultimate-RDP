@@ -1,15 +1,20 @@
-# Installs the selected application bundle in parallel, with a sequential retry
-# for anything that failed. The owning workflow step runs with continue-on-error
-# so a failed package never blocks the session from coming up.
+# Installs the selected application bundle: Chrome from Google's signed
+# enterprise MSI directly, everything else via winget (parallel, with a
+# sequential retry for failures). The owning workflow step runs with
+# continue-on-error so a failed package never blocks the session from coming up.
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Common.psm1') -Force
 
 Write-Step 'Installing the application bundle'
 
+# Google.Chrome is intentionally absent from these lists: winget's community
+# manifest for Chrome trails Google's rolling installer binary (installer hash
+# mismatch, 0x8a150011) and failed in every live run so far - Chrome installs
+# from Google's signed enterprise MSI instead (see Install-ChromeFromEnterpriseMsi).
 $bundleApps = @{
-    all       = @('Google.Chrome', 'Valve.Steam', 'OBSProject.OBSStudio', 'Google.GoogleDrive', 'Rainmeter.Rainmeter')
-    streaming = @('Google.Chrome', 'OBSProject.OBSStudio', 'Rainmeter.Rainmeter')
-    minimal   = @('Google.Chrome')
+    all       = @('Valve.Steam', 'OBSProject.OBSStudio', 'Google.GoogleDrive', 'Rainmeter.Rainmeter')
+    streaming = @('OBSProject.OBSStudio', 'Rainmeter.Rainmeter')
+    minimal   = @()
 }
 $bundle = $env:APP_BUNDLE
 if (-not $bundleApps.ContainsKey($bundle)) {
@@ -17,25 +22,18 @@ if (-not $bundleApps.ContainsKey($bundle)) {
     exit 1
 }
 $apps = @($bundleApps[$bundle])
-if ($apps.Count -eq 0) { Write-Ok 'Nothing to install.'; exit 0 }
-
-# The msstore source sometimes prompts for agreements and is not needed here.
-# Both source operations are cosmetic for this run, so failures only warn.
-try { winget source remove msstore *> $null } catch { Write-Warn 'Could not remove the msstore source (non-fatal).' }
-try { winget source update *> $null } catch { Write-Warn 'Could not update winget sources (non-fatal).' }
+$results = @{}
 
 function Install-ChromeFromEnterpriseMsi {
-    # winget's community manifest can lag behind Google's rolling installer
-    # binary (APPINSTALLER_CLI_ERROR_INSTALLER_HASH_MISMATCH). The enterprise
-    # MSI URL always serves the current stable build, so instead of a pinned
-    # hash the integrity check here is the Authenticode signature chain.
+    # The enterprise MSI URL always serves the current stable build, so instead
+    # of a pinned hash the integrity check is the Authenticode signature chain.
     $msiFile = Join-Path $env:TEMP 'chrome-enterprise.msi'
     $response = Invoke-DownloadWithRetry -Uri 'https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi' -OutFile $msiFile
-    if ($null -eq $response) { Write-Warn 'Chrome fallback: enterprise MSI download failed.'; return $false }
+    if ($null -eq $response) { Write-Warn 'Chrome install: enterprise MSI download failed.'; return $false }
 
     $signature = Get-AuthenticodeSignature -FilePath $msiFile
     if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Google') {
-        Write-Warn "Chrome fallback: signature verification failed ($($signature.Status) / $($signature.SignerCertificate.Subject))."
+        Write-Warn "Chrome install: signature verification failed ($($signature.Status) / $($signature.SignerCertificate.Subject))."
         return $false
     }
     Write-Ok "Chrome MSI signature verified: $($signature.SignerCertificate.Subject)"
@@ -46,42 +44,57 @@ function Install-ChromeFromEnterpriseMsi {
         Write-Ok 'Google Chrome installed from the signed enterprise MSI.'
         return $true
     }
-    Write-Warn "Chrome fallback: msiexec exited with $msiExit."
+    Write-Warn "Chrome install: msiexec exited with $msiExit."
     return $false
 }
 
-# Parallel installs. Each job writes winget output to its own log and returns
-# only the exit code, keeping the job output parseable.
-$jobs = @{}
-foreach ($appId in $apps) {
-    Write-Host "Launching parallel install: $appId"
-    $jobs[$appId] = Start-Job -ScriptBlock {
-        param($AppId)
-        $log = Join-Path $env:TEMP "winget-$AppId.log"
-        winget install --id=$AppId -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity *> $log
-        Write-Output $LASTEXITCODE
-    } -ArgumentList $appId
+# Chrome ships in every non-clean bundle and installs first, from the direct
+# signed MSI - no winget attempt is made for it.
+if ($bundle -ne 'clean') {
+    Write-Host 'Installing Google Chrome from the signed enterprise MSI...'
+    if (Install-ChromeFromEnterpriseMsi) { $results['Google.Chrome'] = 0 } else { $results['Google.Chrome'] = 1 }
 }
 
-$results = @{}
-foreach ($appId in $apps) {
-    $exitCode = [int](Receive-Job -Job $jobs[$appId] -Wait)
-    Remove-Job -Job $jobs[$appId] -Force
-    $results[$appId] = $exitCode
-}
+if ($apps.Count -gt 0) {
+    # The msstore source sometimes prompts for agreements and is not needed here.
+    # Both source operations are cosmetic for this run, so failures only warn.
+    try { winget source remove msstore *> $null } catch { Write-Warn 'Could not remove the msstore source (non-fatal).' }
+    try { winget source update *> $null } catch { Write-Warn 'Could not update winget sources (non-fatal).' }
 
-# One sequential retry per failure, after refreshing the sources: manifest
-# staleness (hash mismatch) and source races are the usual suspects, and both
-# clear once a fresh manifest lands.
-foreach ($appId in @($results.Keys | Where-Object { $results[$_] -ne 0 })) {
-    $hex = '0x{0:x8}' -f ($results[$appId] -band 0xFFFFFFFF)
-    Write-Warn "$appId failed in parallel (exit $hex). Refreshing sources and retrying sequentially..."
-    try { winget source update *> $null } catch { }
-    Start-Sleep -Seconds 15
-    $log = Join-Path $env:TEMP "winget-$appId.log"
-    winget install --id=$appId -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity *> $log
-    $results[$appId] = $LASTEXITCODE
-    if ($results[$appId] -eq 0) { Write-Ok "$appId installed on retry." }
+    # Parallel installs. Each job writes winget output to its own log and returns
+    # only the exit code, keeping the job output parseable.
+    $jobs = @{}
+    foreach ($appId in $apps) {
+        Write-Host "Launching parallel install: $appId"
+        $jobs[$appId] = Start-Job -ScriptBlock {
+            param($AppId)
+            $log = Join-Path $env:TEMP "winget-$AppId.log"
+            winget install --id=$AppId -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity *> $log
+            Write-Output $LASTEXITCODE
+        } -ArgumentList $appId
+    }
+
+    foreach ($appId in $apps) {
+        $exitCode = [int](Receive-Job -Job $jobs[$appId] -Wait)
+        Remove-Job -Job $jobs[$appId] -Force
+        $results[$appId] = $exitCode
+    }
+
+    # One sequential retry per failure, after refreshing the sources: manifest
+    # staleness (hash mismatch) and source races are the usual suspects, and both
+    # clear once a fresh manifest lands.
+    foreach ($appId in @($results.Keys | Where-Object { $results[$_] -ne 0 -and $_ -ne 'Google.Chrome' })) {
+        $hex = '0x{0:x8}' -f ($results[$appId] -band 0xFFFFFFFF)
+        Write-Warn "$appId failed in parallel (exit $hex). Refreshing sources and retrying sequentially..."
+        try { winget source update *> $null } catch { }
+        Start-Sleep -Seconds 15
+        $log = Join-Path $env:TEMP "winget-$appId.log"
+        winget install --id=$appId -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity *> $log
+        $results[$appId] = $LASTEXITCODE
+        if ($results[$appId] -eq 0) { Write-Ok "$appId installed on retry." }
+    }
+} else {
+    Write-Ok 'No winget packages in this bundle.'
 }
 
 # Bundle extras that depend on a successful base install.
@@ -124,13 +137,6 @@ RecBitrate=2500
     Write-Ok 'Lightweight OBS recording profile applied.'
 }
 
-# Chrome is part of every non-clean bundle and its winget manifest is the one
-# most likely to trail Google's rolling builds - give it a direct fallback.
-if ($results.ContainsKey('Google.Chrome') -and $results['Google.Chrome'] -ne 0) {
-    Write-Warn 'winget could not install Google Chrome. Trying the signed Google enterprise MSI fallback...'
-    if (Install-ChromeFromEnterpriseMsi) { $results['Google.Chrome'] = 0 }
-}
-
 $stillFailed = @($results.Keys | Where-Object { $results[$_] -ne 0 })
 foreach ($appId in $stillFailed) {
     Write-Host "::error::$appId could not be installed. Last lines of the winget log:" -ForegroundColor Red
@@ -146,6 +152,6 @@ if ($stillFailed.Count -gt 0) { exit 1 }
 Write-Ok 'All bundle applications installed.'
 
 # Explicit exit 0: the Actions runner appends "exit $LASTEXITCODE" to pwsh
-# steps, and the stale nonzero code from a failed winget attempt above would
+# steps, and a stale nonzero code from a failed install attempt above would
 # otherwise fail this step even when every app ended up installed.
 exit 0
