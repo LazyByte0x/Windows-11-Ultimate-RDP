@@ -1,0 +1,14 @@
+# Local build/run artifacts
+*.log
+*.zip
+*.tmp
+
+# OS and editor noise
+Thumbs.db
+Desktop.ini
+.vs/
+.vscode/
+.idea/
+
+# Local assistant session artifacts
+.zcode/

@@ -1,0 +1,115 @@
+name: Windows Ultimate RDP
+
+on:
+  workflow_dispatch:
+    inputs:
+      theme:
+        description: 'Desktop theme for the RDP session'
+        required: true
+        type: choice
+        options:
+          - dark
+          - light
+        default: 'dark'
+      app_bundle:
+        description: 'Application bundle to install'
+        required: true
+        type: choice
+        options:
+          - all       # Chrome, Steam, OBS, Google Drive, Rainmeter + Mond
+          - streaming # Chrome, OBS, Rainmeter + Mond
+          - minimal   # Chrome only
+          - clean     # nothing
+        default: 'all'
+      wallpaper_url:
+        description: '(Optional) Direct image URL (.jpg/.png) for the desktop wallpaper'
+        required: false
+        default: 'https://4kwallpapers.com/images/wallpapers/wuthering-waves-v2-3840x2160-24011.jpg'
+      session_hours:
+        description: 'Session lifetime in hours (1-6). Shuts down gracefully before the platform cap.'
+        required: false
+        default: '6'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rdp-session-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  rdp-session:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: '📦 Checkout workflow scripts'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: '🛫 Pre-flight validation'
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          THEME: ${{ inputs.theme }}
+          WALLPAPER_URL: ${{ inputs.wallpaper_url }}
+          SESSION_HOURS: ${{ inputs.session_hours }}
+        run: ./scripts/Pre-Flight.ps1
+
+      - name: '🔐 Configure RDP and session users'
+        timeout-minutes: 5
+        shell: pwsh
+        run: ./scripts/New-RdpUsers.ps1
+
+      - name: '🧹 Debloat and optimize Windows'
+        timeout-minutes: 10
+        shell: pwsh
+        run: ./scripts/Invoke-Debloat.ps1
+
+      - name: '🎨 Apply theme and wallpaper'
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          THEME: ${{ inputs.theme }}
+        run: ./scripts/Set-Theme.ps1
+
+      - name: '📦 Install application bundle'
+        if: ${{ inputs.app_bundle != 'clean' }}
+        continue-on-error: true
+        timeout-minutes: 20
+        shell: pwsh
+        env:
+          APP_BUNDLE: ${{ inputs.app_bundle }}
+        run: ./scripts/Install-Apps.ps1
+
+      - name: '🌐 Connect to Tailscale'
+        uses: tailscale/github-action@6cae46e2d796f265265cfcf628b72a32b4d7cade # v3.3.0
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          hostname: winrdp-${{ github.run_id }}
+
+      - name: '📡 Fetch Tailscale IP'
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          $tailscaleExe = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
+          $ip = $null
+          for ($i = 1; $i -le 20; $i++) {
+            $ip = & $tailscaleExe ip -4 2>$null
+            if ($ip) { break }
+            Write-Host "Waiting for the Tailscale IPv4 address (attempt $i/20)..."
+            Start-Sleep -Seconds 5
+          }
+          if (-not $ip) {
+            Write-Host '::error::Failed to obtain the Tailscale IPv4 address. Check that the auth key is valid, ephemeral and reusable.' -ForegroundColor Red
+            exit 1
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "TAILSCALE_IP=$ip" -Encoding utf8
+          Write-Host "Tailscale IPv4: $ip"
+
+      - name: '✨ Publish summary and keep the session alive'
+        shell: pwsh
+        env:
+          APP_BUNDLE: ${{ inputs.app_bundle }}
+          THEME: ${{ inputs.theme }}
+        run: ./scripts/Watch-Session.ps1
