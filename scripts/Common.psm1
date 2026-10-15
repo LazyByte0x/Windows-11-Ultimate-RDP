@@ -28,11 +28,6 @@ function Add-GithubEnv {
     Add-Content -Path $env:GITHUB_ENV -Value "$Name=$Value" -Encoding utf8
 }
 
-function Add-LogMask {
-    param([Parameter(Mandatory)][string]$Value)
-    Write-Host "::add-mask::$Value"
-}
-
 function New-RandomPassword {
     param([int]$Length = 20)
     # Ambiguous characters (l, I, 1, O, 0) are excluded because session users type these by hand.
@@ -82,7 +77,6 @@ Export-ModuleMember -Function @(
     'Write-Ok',
     'Write-Warn',
     'Add-GithubEnv',
-    'Add-LogMask',
     'New-RandomPassword',
     'Invoke-DownloadWithRetry',
     'Test-ImageResponse'

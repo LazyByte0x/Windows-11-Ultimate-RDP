@@ -46,18 +46,23 @@ function Add-LocalGroupMemberSafe {
 # 14 characters (a legacy LM-hash prompt) and cannot get an answer in a
 # non-interactive shell. The cmdlets have no such limit, so the 20-character
 # passwords work as designed.
+#
+# The passwords are deliberately NOT registered with ::add-mask::: masking
+# redacts the value everywhere it would be printed, including the job Summary
+# page, which is the intended delivery channel for these credentials. The
+# exposure model (visible to anyone who can view this repository's Actions
+# runs, random per run, destroyed with the session) is documented in the README
+# and in the Summary privacy note.
 
 # Rotate the built-in runner admin password for this run only.
 $adminPassword = New-RandomPassword
-Add-LogMask $adminPassword
 $adminPasswordSecure = ConvertTo-SecureString $adminPassword -AsPlainText -Force
 Set-LocalUserPassword -UserName 'runneradmin' -Password $adminPasswordSecure
 Add-GithubEnv -Name 'RDP_ADMIN_PASS' -Value $adminPassword
-Write-Ok 'runneradmin password rotated and masked in logs'
+Write-Ok 'runneradmin password rotated'
 
 # Dedicated session account with admin and RDP group membership.
 $sessionPassword = New-RandomPassword
-Add-LogMask $sessionPassword
 $sessionPasswordSecure = ConvertTo-SecureString $sessionPassword -AsPlainText -Force
 Set-LocalUserPassword -UserName 'ditzz' -Password $sessionPasswordSecure
 Add-LocalGroupMemberSafe -GroupName 'Administrators' -MemberName 'ditzz'
