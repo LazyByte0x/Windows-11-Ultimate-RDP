@@ -33,8 +33,19 @@ jobs:
       - name: '🔍 Validate PowerShell scripts (PSScriptAnalyzer)'
         shell: pwsh
         run: |
-          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force
+          try {
+            Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction Stop
+            if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+              Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force -ErrorAction Stop
+            }
+          } catch {
+            Write-Host "::error::PSScriptAnalyzer setup failed: $($_.Exception.Message)"
+            exit 1
+          }
           $findings = Invoke-ScriptAnalyzer -Path ./scripts -Recurse -Severity Error
+          foreach ($f in $findings) {
+            $relPath = Resolve-Path -Relative -Path $f.ScriptPath
+            Write-Host "::error file=$relPath,line=$($f.Line),col=$($f.Column)::[$($f.RuleName)] $($f.Message)"
+          }
           $findings | Format-Table -AutoSize
-          if ($findings.Count -gt 0) { exit 1 }
+          if (@($findings).Count -gt 0) { exit 1 }
