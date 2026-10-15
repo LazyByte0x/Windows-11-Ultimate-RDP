@@ -17,23 +17,50 @@ try {
 Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'UserAuthentication' -Value 1 -Force
 Write-Ok 'RDP listener enabled with Network Level Authentication'
 
+function Set-LocalUserPassword {
+    param(
+        [Parameter(Mandatory)][string]$UserName,
+        [Parameter(Mandatory)][securestring]$Password
+    )
+    if (Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue) {
+        Set-LocalUser -Name $UserName -Password $Password
+    } else {
+        New-LocalUser -Name $UserName -Password $Password -AccountNeverExpires
+        Set-LocalUser -Name $UserName -PasswordNeverExpires $true
+    }
+}
+
+function Add-LocalGroupMemberSafe {
+    param(
+        [Parameter(Mandatory)][string]$GroupName,
+        [Parameter(Mandatory)][string]$MemberName
+    )
+    $isMember = Get-LocalGroupMember -Group $GroupName -Member $MemberName -ErrorAction SilentlyContinue
+    if (-not $isMember) {
+        Add-LocalGroupMember -Group $GroupName -Member $MemberName
+    }
+}
+
+# Per-run random credentials, rotated through the LocalAccounts cmdlets instead
+# of net.exe: "net user /add" asks for Y/N confirmation on passwords longer than
+# 14 characters (a legacy LM-hash prompt) and cannot get an answer in a
+# non-interactive shell. The cmdlets have no such limit, so the 20-character
+# passwords work as designed.
+
 # Rotate the built-in runner admin password for this run only.
 $adminPassword = New-RandomPassword
 Add-LogMask $adminPassword
-$adminOutput = net user 'runneradmin' $adminPassword
-if ($LASTEXITCODE -ne 0) { throw "Failed to rotate the runneradmin password: $adminOutput" }
+$adminPasswordSecure = ConvertTo-SecureString $adminPassword -AsPlainText -Force
+Set-LocalUserPassword -UserName 'runneradmin' -Password $adminPasswordSecure
 Add-GithubEnv -Name 'RDP_ADMIN_PASS' -Value $adminPassword
 Write-Ok 'runneradmin password rotated and masked in logs'
 
 # Dedicated session account with admin and RDP group membership.
 $sessionPassword = New-RandomPassword
 Add-LogMask $sessionPassword
-$createOutput = net user 'ditzz' $sessionPassword /add /fullname:'Session User'
-if ($LASTEXITCODE -ne 0) { throw "Failed to create the session user: $createOutput" }
-Set-LocalUser -Name 'ditzz' -PasswordNeverExpires $true
-$adminGroupOutput = net localgroup 'Administrators' 'ditzz' /add
-if ($LASTEXITCODE -ne 0) { throw "Failed to add 'ditzz' to Administrators: $adminGroupOutput" }
-$rdpGroupOutput = net localgroup 'Remote Desktop Users' 'ditzz' /add
-if ($LASTEXITCODE -ne 0) { throw "Failed to add 'ditzz' to Remote Desktop Users: $rdpGroupOutput" }
+$sessionPasswordSecure = ConvertTo-SecureString $sessionPassword -AsPlainText -Force
+Set-LocalUserPassword -UserName 'ditzz' -Password $sessionPasswordSecure
+Add-LocalGroupMemberSafe -GroupName 'Administrators' -MemberName 'ditzz'
+Add-LocalGroupMemberSafe -GroupName 'Remote Desktop Users' -MemberName 'ditzz'
 Add-GithubEnv -Name 'RDP_SESSION_PASS' -Value $sessionPassword
-Write-Ok "Session user 'ditzz' created (Administrators + Remote Desktop Users)"
+Write-Ok "Session user 'ditzz' provisioned (Administrators + Remote Desktop Users)"
