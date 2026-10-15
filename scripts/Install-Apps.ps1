@@ -144,3 +144,8 @@ foreach ($appId in $stillFailed) {
 Add-GithubEnv -Name 'APPS_FAILED' -Value ($stillFailed -join ', ')
 if ($stillFailed.Count -gt 0) { exit 1 }
 Write-Ok 'All bundle applications installed.'
+
+# Explicit exit 0: the Actions runner appends "exit $LASTEXITCODE" to pwsh
+# steps, and the stale nonzero code from a failed winget attempt above would
+# otherwise fail this step even when every app ended up installed.
+exit 0

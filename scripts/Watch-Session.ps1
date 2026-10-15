@@ -77,3 +77,4 @@ while ($true) {
 }
 
 Write-Host "`nSession window complete. Ending this job destroys the environment." -ForegroundColor Yellow
+exit 0

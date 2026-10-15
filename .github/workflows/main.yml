@@ -106,6 +106,7 @@ jobs:
           }
           Add-Content -Path $env:GITHUB_ENV -Value "TAILSCALE_IP=$ip" -Encoding utf8
           Write-Host "Tailscale IPv4: $ip"
+          exit 0
 
       - name: '✨ Publish summary and keep the session alive'
         shell: pwsh

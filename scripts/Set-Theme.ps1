@@ -25,3 +25,5 @@ if (-not [string]::IsNullOrWhiteSpace($wallpaperFile) -and (Test-Path $wallpaper
 } else {
     Write-Warn 'No validated wallpaper available - keeping the default desktop background.'
 }
+
+exit 0

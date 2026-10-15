@@ -47,3 +47,5 @@ if ([string]::IsNullOrWhiteSpace($env:WALLPAPER_URL)) {
         Write-Warn 'Wallpaper URL is unreachable or does not serve an image - the default background will be kept.'
     }
 }
+
+exit 0

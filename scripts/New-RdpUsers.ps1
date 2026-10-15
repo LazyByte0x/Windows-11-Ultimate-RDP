@@ -69,3 +69,5 @@ Add-LocalGroupMemberSafe -GroupName 'Administrators' -MemberName 'ditzz'
 Add-LocalGroupMemberSafe -GroupName 'Remote Desktop Users' -MemberName 'ditzz'
 Add-GithubEnv -Name 'RDP_SESSION_PASS' -Value $sessionPassword
 Write-Ok "Session user 'ditzz' provisioned (Administrators + Remote Desktop Users)"
+
+exit 0
