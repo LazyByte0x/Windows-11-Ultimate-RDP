@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-    <img src="https://img.shields.io/badge/Version-v7.4-blue?style=for-the-badge">
+    <img src="https://img.shields.io/badge/Version-v7.5-blue?style=for-the-badge">
     <img src="https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows">
     <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge">
 </p>
@@ -77,9 +77,9 @@ If a second run starts while a session is live, the new run replaces the old one
 - **Secure provisioning** — enables RDP with Network Level Authentication and creates two accounts whose passwords are cryptographically random per run and masked in logs.
 - **Debloat and tuning** — removes consumer bloatware, disables telemetry services, activates the Ultimate Performance power plan, and disables mouse acceleration.
 - **Personalization** — applies the chosen theme and a validated custom wallpaper.
-- **Application bundles** — installs the selected packages in parallel via winget, with a sequential retry for anything that failed; a failed package never blocks the session.
+- **Application bundles** — installs Chrome directly from Google's signed enterprise MSI, and the remaining selected packages in parallel via winget with a source-refresh retry; a failed package never blocks the session, and any failure prints its winget log into the run log.
 - **Health-checked keep-alive** — every 5 minutes the session verifies that the Tailscale service and the RDP listener are alive (any deviation is reported), and the session ends gracefully at the requested time.
-- **Quality gate** — pull requests are linted with actionlint (workflow files) and PSScriptAnalyzer (PowerShell scripts) so a broken change never reaches a run.
+- **Quality gate** — pull requests and direct pushes to `main` are linted with actionlint (workflow files) and PSScriptAnalyzer (PowerShell scripts) so a broken change never reaches a run.
 
 All provisioning logic lives in `scripts/*.ps1`; the workflow file is a thin orchestrator that passes user inputs through environment variables (never text interpolation), which closes the script-injection vector that earlier versions had.
 
@@ -93,13 +93,17 @@ All provisioning logic lives in `scripts/*.ps1`; the workflow file is a thin orc
 | Run fails at the Tailscale step | The auth key expired, is single-use, or was already consumed — generate a new Ephemeral + Reusable key |
 | Cannot connect from your device | Your device must be signed in to the **same tailnet**; check the Tailscale client status before blaming the session |
 | Wrong credentials | Read them from the run's Summary tab of **that specific run** — passwords differ per run |
-| An application failed to install | The session still comes up; check the install step log and `%TEMP%\winget-<appId>.log` details, then rerun |
+| An application failed to install | The session still comes up; the last lines of the winget log are printed in the install step log — review them there, then rerun |
 | Session ended earlier than expected | The `session_hours` input elapsed; the Summary shows the planned end time |
 | Job killed at exactly 6 hours | The platform cap — choose a lower `session_hours` value for graceful shutdown |
 
 ---
 
 ## 📜 Changelog
+
+### v7.5
+- **Run hardening from the first live sessions:** user provisioning moved from `net.exe` (which prompts for confirmation on 14+ character passwords and dies in a non-interactive shell) to the LocalAccounts cmdlets; Chrome installs directly from Google's signed enterprise MSI after winget's community manifest repeatedly trailed Google's rolling installer (hash mismatch `0x8a150011`); every entry script ends with an explicit `exit 0` because the Actions runner appends `exit $LASTEXITCODE` to pwsh steps, which had failed steps even after a recovered install; session passwords are no longer registered with `::add-mask::` because masking also redacts the Summary — the intended delivery channel for these credentials.
+- **Workflow:** `actions/checkout` pinned to v5.1.0 (Node 24 — clears the Node 20 deprecation warning); the Quality Gate now also runs on direct pushes to `main`; the Tailscale action caches its installer between runs.
 
 ### v7.4
 - **Security:** randomly generated per-run passwords (masked in logs) replace hardcoded credentials; user inputs are passed via environment variables, closing the template-injection vector in the wallpaper/theme inputs; `permissions: contents: read` limits the workflow token; the Tailscale connection moved to the official `tailscale/github-action` with a pinned SHA instead of an unpinned installer download; dead and untrustworthy third-party binaries (Steam Achievement Manager, system-info spoofing, Universal Watermark Disabler — its source URL no longer exists) were removed.

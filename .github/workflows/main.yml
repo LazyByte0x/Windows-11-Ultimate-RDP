@@ -87,6 +87,7 @@ jobs:
         with:
           authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
           hostname: winrdp-${{ github.run_id }}
+          use-cache: 'true'
 
       - name: '📡 Fetch Tailscale IP'
         timeout-minutes: 3
